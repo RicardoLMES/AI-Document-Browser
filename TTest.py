@@ -9,6 +9,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from streamlit_chat import message
 
+st.set_page_config(page_title="AI Document Reader Chat", page_icon=":books:")
 
 # Function to extract text from a list of PDF documents
 def get_pdf_text(pdf_docs):
@@ -43,16 +44,33 @@ def get_text_chunks(text):
     return chunks
 
 
+# Function to check if the vector store already exists
+def vector_store_exists():
+    return os.path.exists("faiss_vectorstore")
+
+
 # Function to create and save a vector store from text chunks for later retrieval
 def load_vector_data(text_chunks):
+    # If the vector store already exists, just load it
+    if vector_store_exists():
+        st.info("Vector store already exists. Loading...")
+        try:
+            return FAISS.load_local(folder_path="faiss_vectorstore", embeddings=OpenAIEmbeddings())
+        except Exception as e:
+            st.error(f"Failed to load existing vector data: {e}")
+            return None
+
+    # If the vector store does not exist, create a new one
     try:
         embeddings = OpenAIEmbeddings()
         vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
         vectorstore.save_local("faiss_vectorstore")
+        st.success("New vector store created and saved.")
         return vectorstore
     except Exception as e:
         st.error(f"Failed to load vector data: {e}")
         return None
+
 
 
 # Function to create a conversational chain that can handle queries using a retrieval model
@@ -82,8 +100,6 @@ def init():
     if not os.getenv("OPENAI_API_KEY"):
         st.error("OPENAI_API_KEY is not set. Please set the environment variable and restart the app.")
         st.stop()
-
-    st.set_page_config(page_title="AI Document Reader Chat", page_icon=":books:")
 
 
 # The main function where the Streamlit app logic resides
@@ -120,13 +136,15 @@ def main():
             message(response)
 
     # Sidebar setup for uploading and processing PDF documents
-    with st.sidebar:
-        st.subheader("Your Documents")
-        pdf_docs = st.file_uploader("Upload your PDF documents here:", accept_multiple_files=True, type=['pdf'])
-        if st.button("Process Documents"):
-            if pdf_docs:
-                with st.spinner("Processing..."):
-                    try:
+with st.sidebar:
+    st.subheader("Your Documents")
+    pdf_docs = st.file_uploader("Upload your PDF documents here:", accept_multiple_files=True, type=['pdf'])
+    if st.button("Process Documents"):
+        if pdf_docs:
+            with st.spinner("Processing..."):
+                try:
+                    # Check if vector store needs to be created or loaded
+                    if not vector_store_exists():
                         raw_text = get_pdf_text(pdf_docs)  # Turns PDF into text
                         if raw_text:
                             text_chunks = get_text_chunks(raw_text)  # Splits text into chunks
@@ -135,10 +153,14 @@ def main():
                                 st.success("Documents processed successfully. You can now ask questions about your documents.")
                             else:
                                 st.error("Failed to process documents for conversation.")
-                    except Exception as e:
-                        st.error(f"An error occurred while processing documents: {e}")
-            else:
-                st.warning("Please upload at least one PDF document.")
+                        else:
+                            st.warning("No text extracted. Cannot process documents.")
+                    else:
+                        st.info("Vector store loaded. You can continue asking questions about your documents.")
+                except Exception as e:
+                    st.error(f"An error occurred while processing documents: {e}")
+        else:
+            st.warning("Please upload at least one PDF document.")
 
 
 # Entry point for the script
